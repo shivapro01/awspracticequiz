@@ -579,7 +579,10 @@ button, input {
 .progress-track { height: 8px; border-radius: 999px; background: var(--grey); overflow: hidden; border: 1px solid var(--border); }
 .progress-track.big { height: 12px; }
 .progress-fill { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--accent-1), var(--accent-2), var(--accent-3)); transition: width 0.5s ease; }
-.topbar-title { display: flex; gap: 12px; align-items: center; }
+.topbar-title { display: flex; gap: 12px; align-items: flex-start; flex-direction: column; }
+.topbar-nav-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.topbar-heading h1 { margin: 0 0 2px; font-size: 24px; letter-spacing: -0.02em; }
+.topbar-heading .muted { margin: 0; }
 .panel, .question-nav { border-radius: var(--radius); box-shadow: var(--shadow); }
 .small { font-size: 12px; }
 

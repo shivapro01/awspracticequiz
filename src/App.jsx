@@ -376,16 +376,18 @@ function App() {
       <section className="content">
         <div className="topbar">
           <div className="topbar-title">
-            <button
-              className="hamburger-button"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open practice test list"
-              aria-expanded={sidebarOpen}
-            >
-              <Menu size={19} />
-            </button>
-            <button className="ghost-button compact" onClick={goHome}><ChevronLeft size={15} /> Home</button>
-            <div>
+            <div className="topbar-nav-row">
+              <button
+                className="hamburger-button"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open practice test list"
+                aria-expanded={sidebarOpen}
+              >
+                <Menu size={19} />
+              </button>
+              <button className="ghost-button compact" onClick={goHome}><ChevronLeft size={15} /> Home</button>
+            </div>
+            <div className="topbar-heading">
               <h1>{activeTest.title}</h1>
               <p className="muted">Questions {activeTest.startQuestion}-{activeTest.endQuestion}</p>
             </div>
