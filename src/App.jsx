@@ -1,5 +1,32 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronLeft, ChevronRight, Moon, RotateCcw, Send, Sun, Timer, XCircle } from "lucide-react";
+import {
+  ArrowRight,
+  Award,
+  BarChart3,
+  BookOpenCheck,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Cloud,
+  GraduationCap,
+  Home,
+  Layers,
+  Menu,
+  Moon,
+  Play,
+  RotateCcw,
+  Search,
+  Send,
+  Shuffle,
+  Sparkles,
+  Sun,
+  Target,
+  Timer,
+  Trophy,
+  X,
+  XCircle,
+} from "lucide-react";
 import { createRoot } from "react-dom/client";
 import data from "./data/questions.json";
 import { getExplanation } from "./data/explanations";
@@ -65,12 +92,48 @@ function isCorrect(question, answer = []) {
   return question.correctAnswer.length === answer.length && question.correctAnswer.every((key) => answer.includes(key));
 }
 
+function readStoredTestState(testId) {
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}:${testId}`);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function getTestProgress(test) {
+  const saved = readStoredTestState(test.id);
+  if (!saved) {
+    return { status: "not-started", attempted: 0, answered: 0, skipped: 0, submitted: false, score: null, total: test.questions.length };
+  }
+  const answered = Object.keys(saved.answers ?? {}).length;
+  const skipped = Object.keys(saved.skipped ?? {}).length;
+  const submitted = Boolean(saved.submitted);
+  let score = null;
+  if (submitted) {
+    score = test.questions.filter((q) => isCorrect(q, saved.answers?.[q.id])).length;
+  }
+  const status = submitted ? "completed" : answered > 0 || skipped > 0 ? "in-progress" : "not-started";
+  return { status, attempted: answered, answered, skipped, submitted, score, total: test.questions.length };
+}
+
+const EXAM_DOMAINS = [
+  { name: "Resilient Architectures", weight: "30%", Icon: Layers, desc: "High availability, decoupling, disaster recovery & multi-tier design." },
+  { name: "High-Performing Architectures", weight: "28%", Icon: Sparkles, desc: "Scalable compute, storage, databases & networking for performance." },
+  { name: "Secure Applications", weight: "24%", Icon: Award, desc: "IAM, encryption, network security & data protection controls." },
+  { name: "Cost-Optimized Architectures", weight: "18%", Icon: Target, desc: "Right-sizing, pricing models & eliminating waste." },
+];
+
 function App() {
   const [activeTestId, setActiveTestId] = useState(data.tests[0].id);
   const activeTest = data.tests.find((test) => test.id === activeTestId) ?? data.tests[0];
   const [testState, setTestState] = useState(() => loadState(activeTest));
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "light");
   const [now, setNow] = useState(Date.now());
+  const [view, setView] = useState("home");
+  const [progressTick, setProgressTick] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     setTestState(loadState(activeTest));
@@ -89,6 +152,20 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [sidebarOpen]);
 
   const questionById = useMemo(() => new Map(activeTest.questions.map((question) => [question.id, question])), [activeTest]);
   const orderedQuestions = useMemo(
@@ -172,32 +249,146 @@ function App() {
     updateState(() => ({ submitted: true, elapsedBeforeSubmit: elapsedSeconds }));
   }
 
+  function openTest(testId) {
+    setActiveTestId(testId);
+    setTestState(loadState(data.tests.find((t) => t.id === testId) ?? activeTest));
+    setView("quiz");
+    setSidebarOpen(false);
+    window.scrollTo(0, 0);
+  }
+
+  function goHome() {
+    setProgressTick((t) => t + 1);
+    setView("home");
+    setSidebarOpen(false);
+    window.scrollTo(0, 0);
+  }
+
+  // ---- Home dashboard derived stats ----
+  const [homeQuery, setHomeQuery] = useState("");
+  const [homeFilter, setHomeFilter] = useState("all");
+
+  const allProgress = useMemo(
+    () => data.tests.map((t) => ({ test: t, progress: getTestProgress(t) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [progressTick, testState, activeTestId, view],
+  );
+
+  const dashboard = useMemo(() => {
+    const completed = allProgress.filter((x) => x.progress.status === "completed");
+    const inProgress = allProgress.filter((x) => x.progress.status === "in-progress");
+    const scores = completed.map((x) => x.progress.score ?? 0);
+    const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+    const totalAnswered = allProgress.reduce((a, x) => a + x.progress.answered, 0);
+    const overallPct = Math.round((totalAnswered / Math.max(1, data.totalQuestions)) * 100);
+    const best = completed.length
+      ? completed.reduce((a, b) => ((a.progress.score ?? 0) > (b.progress.score ?? 0) ? a : b))
+      : null;
+    const continueItem = inProgress[0] ?? allProgress.find((x) => x.progress.status === "not-started") ?? allProgress[0];
+    return { completed: completed.length, inProgress: inProgress.length, avgScore, totalAnswered, overallPct, best, continueItem };
+  }, [allProgress]);
+
+  const filteredTests = useMemo(() => {
+    const q = homeQuery.trim().toLowerCase();
+    return allProgress.filter(({ test, progress }) => {
+      if (homeFilter !== "all" && progress.status !== homeFilter) return false;
+      if (!q) return true;
+      return (
+        test.title.toLowerCase().includes(q) ||
+        `${test.startQuestion}-${test.endQuestion}`.includes(q) ||
+        String(test.startQuestion).includes(q)
+      );
+    });
+  }, [allProgress, homeQuery, homeFilter]);
+
+  function startRandom() {
+    const pool = allProgress.filter((x) => x.progress.status !== "completed");
+    const pick = (pool.length ? pool : allProgress)[Math.floor(Math.random() * (pool.length ? pool.length : allProgress.length))];
+    if (pick) openTest(pick.test.id);
+  }
+
+  if (view === "home") {
+    return (
+      <HomeScreen
+        theme={theme}
+        setTheme={setTheme}
+        dashboard={dashboard}
+        filteredTests={filteredTests}
+        homeQuery={homeQuery}
+        setHomeQuery={setHomeQuery}
+        homeFilter={homeFilter}
+        setHomeFilter={setHomeFilter}
+        onOpen={openTest}
+        onRandom={startRandom}
+      />
+    );
+  }
+
   return (
     <main className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <h1>AWS SAA-C03 Quiz</h1>
-          <p>{data.totalQuestions} questions split into {data.tests.length} practice tests</p>
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? "show" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden={!sidebarOpen}
+      />
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-top-row">
+          <button className="home-link" onClick={goHome}>
+            <span className="home-link-icon"><Home size={16} /></span>
+            <span>Home</span>
+          </button>
+          <button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close practice test list">
+            <X size={18} />
+          </button>
         </div>
+        <div className="brand">
+          <div className="brand-badge"><Cloud size={18} /></div>
+          <div>
+            <h1>AWS SAA-C03 Quiz</h1>
+            <p>{data.totalQuestions} questions · {data.tests.length} practice tests</p>
+          </div>
+        </div>
+        <div className="sidebar-label">Practice tests</div>
         <div className="test-list">
-          {data.tests.map((test) => (
+          {allProgress.map(({ test, progress }) => (
             <button
               className={`test-button ${test.id === activeTestId ? "active" : ""}`}
               key={test.id}
-              onClick={() => setActiveTestId(test.id)}
+              onClick={() => openTest(test.id)}
             >
-              <span>{test.title}</span>
+              <span className="test-button-main">
+                <span className={`dot dot-${progress.status}`} />
+                <span>{test.title}</span>
+              </span>
               <span className="muted">{test.startQuestion}-{test.endQuestion}</span>
             </button>
           ))}
+        </div>
+        <div className="sidebar-foot">
+          <div className="sidebar-progress">
+            <div className="sidebar-progress-top"><span>Overall progress</span><span>{dashboard.overallPct}%</span></div>
+            <div className="progress-track"><div className="progress-fill" style={{ width: `${dashboard.overallPct}%` }} /></div>
+          </div>
+          <button className="ghost-button compact full" onClick={goHome}><Home size={15} /> Dashboard</button>
         </div>
       </aside>
 
       <section className="content">
         <div className="topbar">
-          <div>
-            <h1>{activeTest.title}</h1>
-            <p className="muted">Questions {activeTest.startQuestion}-{activeTest.endQuestion}</p>
+          <div className="topbar-title">
+            <button
+              className="hamburger-button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open practice test list"
+              aria-expanded={sidebarOpen}
+            >
+              <Menu size={19} />
+            </button>
+            <button className="ghost-button compact" onClick={goHome}><ChevronLeft size={15} /> Home</button>
+            <div>
+              <h1>{activeTest.title}</h1>
+              <p className="muted">Questions {activeTest.startQuestion}-{activeTest.endQuestion}</p>
+            </div>
           </div>
           <div className="stats">
             <button className="ghost-button compact" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
@@ -210,27 +401,7 @@ function App() {
           </div>
         </div>
 
-        <div className="workspace">
-          <nav className="question-nav" aria-label="Question list">
-            {orderedQuestions.map((question, index) => {
-              const status = testState.skipped[question.id]
-                ? "skipped"
-                : testState.answers[question.id]?.length
-                  ? "answered"
-                  : "";
-              return (
-                <button
-                  className={`qnum ${status} ${index === testState.currentIndex ? "current" : ""}`}
-                  key={question.id}
-                  onClick={() => goTo(index)}
-                  title={`Question ${index + 1}`}
-                >
-                  {index + 1}
-                </button>
-              );
-            })}
-          </nav>
-
+        <div className="workspace workspace-questions-first">
           {testState.submitted ? (
             <ResultPanel questions={orderedQuestions} result={result} answers={testState.answers} optionOrder={testState.optionOrder} onRestart={restartTest} />
           ) : (
@@ -280,9 +451,262 @@ function App() {
               </div>
             </article>
           )}
+          <nav className="question-nav" aria-label="Question list">
+            <div className="question-nav-title">Questions</div>
+            <div className="question-nav-grid">
+            {orderedQuestions.map((question, index) => {
+              const status = testState.skipped[question.id]
+                ? "skipped"
+                : testState.answers[question.id]?.length
+                  ? "answered"
+                  : "";
+              return (
+                <button
+                  className={`qnum ${status} ${index === testState.currentIndex ? "current" : ""}`}
+                  key={question.id}
+                  onClick={() => goTo(index)}
+                  title={`Question ${index + 1}`}
+                >
+                  {index + 1}
+                </button>
+              );
+            })}
+            </div>
+          </nav>
         </div>
       </section>
     </main>
+  );
+}
+
+function HomeScreen({
+  theme,
+  setTheme,
+  dashboard,
+  filteredTests,
+  homeQuery,
+  setHomeQuery,
+  homeFilter,
+  setHomeFilter,
+  onOpen,
+  onRandom,
+}) {
+  const continueTest = dashboard.continueItem?.test;
+  const continueProgress = dashboard.continueItem?.progress;
+  const filters = [
+    { id: "all", label: "All tests" },
+    { id: "not-started", label: "Not started" },
+    { id: "in-progress", label: "In progress" },
+    { id: "completed", label: "Completed" },
+  ];
+
+  return (
+    <div className="home">
+      <header className="home-nav">
+        <div className="home-nav-inner">
+          <div className="home-brand">
+            <span className="home-logo"><Cloud size={20} /></span>
+            <div>
+              <strong>AWS SAA-C03</strong>
+              <span>Practice Exams</span>
+            </div>
+          </div>
+          <div className="home-nav-actions">
+            <span className="pill hide-mobile"><BookOpenCheck size={15} /> {data.totalQuestions} questions</span>
+            <button className="ghost-button compact" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              {theme === "dark" ? "Light" : "Dark"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section className="hero">
+        <div className="hero-inner">
+          <div className="hero-copy">
+            <span className="hero-badge"><Sparkles size={14} /> AWS Certified Solutions Architect · Associate</span>
+            <h1>Ace the SAA-C03 exam with <span className="gradient-text">{data.totalQuestions} practice questions</span></h1>
+            <p className="hero-sub">
+              {data.tests.length} focused 20-question practice tests with instant explanations, shuffled options,
+              timers, and progress tracking — everything you need to walk in confident.
+            </p>
+            <div className="hero-cta">
+              {continueTest ? (
+                <button className="primary-button large" onClick={() => onOpen(continueTest.id)}>
+                  <Play size={18} />
+                  {continueProgress?.status === "in-progress"
+                    ? `Continue ${continueTest.title}`
+                    : continueProgress?.status === "completed"
+                      ? "Keep practicing"
+                      : `Start ${continueTest.title}`}
+                </button>
+              ) : null}
+              <button className="ghost-button large" onClick={onRandom}>
+                <Shuffle size={18} /> Surprise me
+              </button>
+            </div>
+            <div className="hero-meta">
+              <span><CheckCircle2 size={15} /> Instant explanations</span>
+              <span><Timer size={15} /> Timed sessions</span>
+              <span><RotateCcw size={15} /> Auto-saved progress</span>
+            </div>
+          </div>
+
+          <div className="hero-card">
+            <div className="hero-card-head">
+              <span className="hero-card-title"><BarChart3 size={16} /> Your progress</span>
+              <span className="pill">{dashboard.overallPct}% complete</span>
+            </div>
+            <div className="progress-track big"><div className="progress-fill" style={{ width: `${dashboard.overallPct}%` }} /></div>
+            <div className="hero-stats">
+              <div className="hero-stat">
+                <span className="hero-stat-icon"><Trophy size={17} /></span>
+                <div><strong>{dashboard.completed}/{data.tests.length}</strong><span>tests done</span></div>
+              </div>
+              <div className="hero-stat">
+                <span className="hero-stat-icon"><Target size={17} /></span>
+                <div><strong>{dashboard.avgScore !== null ? `${dashboard.avgScore}/20` : "—"}</strong><span>avg. score</span></div>
+              </div>
+              <div className="hero-stat">
+                <span className="hero-stat-icon"><Clock size={17} /></span>
+                <div><strong>{dashboard.totalAnswered}</strong><span>answered</span></div>
+              </div>
+            </div>
+            {dashboard.best ? (
+              <div className="hero-best">
+                <GraduationCap size={16} />
+                <span>Best: <strong>{dashboard.best.test.title}</strong> — {dashboard.best.progress.score}/{dashboard.best.progress.total}</span>
+              </div>
+            ) : (
+              <div className="hero-best muted-box">
+                <Sparkles size={16} />
+                <span>Finish your first test to unlock your average score.</span>
+              </div>
+            )}
+            <div className="hero-card-foot">
+              <span><Layers size={14} /> {dashboard.inProgress} in progress</span>
+              <button className="link-button" onClick={() => document.getElementById("tests")?.scrollIntoView({ behavior: "smooth" })}>
+                Browse tests <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <main className="home-body">
+        <section className="feature-grid">
+          <div className="feature">
+            <span className="feature-icon"><BookOpenCheck size={20} /></span>
+            <h3>Bite-size practice tests</h3>
+            <p>20 questions per test so you can fit a full session into a coffee break — no burnout.</p>
+          </div>
+          <div className="feature">
+            <span className="feature-icon"><CheckCircle2 size={20} /></span>
+            <h3>Learn as you go</h3>
+            <p>Check any answer instantly and read why the correct option wins.</p>
+          </div>
+          <div className="feature">
+            <span className="feature-icon"><Timer size={20} /></span>
+            <h3>Real exam feel</h3>
+            <p>Shuffled questions, shuffled options, live timer, and a wrong-answer review screen.</p>
+          </div>
+          <div className="feature">
+            <span className="feature-icon"><Award size={20} /></span>
+            <h3>Never lose progress</h3>
+            <p>Answers, skips, and timers auto-save per test. Refresh freely.</p>
+          </div>
+        </section>
+
+        <section className="domains">
+          <div className="section-head">
+            <h2>What the exam covers</h2>
+            <p className="muted">SAA-C03 weights — every practice test draws from all four domains.</p>
+          </div>
+          <div className="domain-grid">
+            {EXAM_DOMAINS.map(({ name, weight, Icon, desc }) => (
+              <div className="domain-card" key={name}>
+                <span className="feature-icon small"><Icon size={18} /></span>
+                <div className="domain-top"><strong>{name}</strong><span className="pill">{weight}</span></div>
+                <p className="muted">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section id="tests" className="tests-section">
+          <div className="section-head split">
+            <div>
+              <h2>Choose your practice test</h2>
+              <p className="muted">{filteredTests.length} of {data.tests.length} tests shown</p>
+            </div>
+            <div className="tests-controls">
+              <label className="search-box">
+                <Search size={16} />
+                <input
+                  placeholder="Search tests… e.g. Test 12 or 221"
+                  value={homeQuery}
+                  onChange={(e) => setHomeQuery(e.target.value)}
+                />
+              </label>
+              <div className="filter-row">
+                {filters.map((f) => (
+                  <button
+                    key={f.id}
+                    className={`chip ${homeFilter === f.id ? "active" : ""}`}
+                    onClick={() => setHomeFilter(f.id)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {filteredTests.length === 0 ? (
+            <div className="panel empty">
+              <p>No tests match your search. Try clearing the filter.</p>
+              <button className="ghost-button" onClick={() => { setHomeQuery(""); setHomeFilter("all"); }}>Reset filters</button>
+            </div>
+          ) : (
+            <div className="test-grid">
+              {filteredTests.map(({ test, progress }) => {
+                const pct = Math.round((progress.answered / Math.max(1, progress.total)) * 100);
+                const cta =
+                  progress.status === "completed" ? "View results" :
+                  progress.status === "in-progress" ? "Continue" : "Start test";
+                return (
+                  <article className={`test-card status-${progress.status}`} key={test.id}>
+                    <div className="test-card-top">
+                      <span className={`status-badge ${progress.status}`}>
+                        {progress.status === "completed" ? "Completed" : progress.status === "in-progress" ? "In progress" : "Not started"}
+                      </span>
+                      <span className="muted small">Q {test.startQuestion}–{test.endQuestion}</span>
+                    </div>
+                    <h3>{test.title}</h3>
+                    <p className="muted small">{progress.total} questions · shuffled every attempt</p>
+                    <div className="progress-track"><div className="progress-fill" style={{ width: `${progress.submitted ? 100 : pct}%` }} /></div>
+                    <div className="test-card-meta">
+                      {progress.submitted && progress.score !== null ? (
+                        <span className="score">Score {progress.score}/{progress.total}</span>
+                      ) : (
+                        <span className="muted small">{progress.answered}/{progress.total} answered{progress.skipped ? ` · ${progress.skipped} skipped` : ""}</span>
+                      )}
+                    </div>
+                    <button className={progress.status === "not-started" ? "primary-button full" : "ghost-button full"} onClick={() => onOpen(test.id)}>
+                      <Play size={16} /> {cta} <ArrowRight size={15} />
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <footer className="home-foot">
+          <p className="muted">Question bank is scraped from a third-party dump — answers may contain mistakes. Use as extra practice, not your sole source of truth.</p>
+        </footer>
+      </main>
+    </div>
   );
 }
 
